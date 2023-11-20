@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Tweet</title>
+</head>
+<body>
+    <h1>Create a Tweet</h1>
+    <form id="tweetForm">
+        <label for="tweetContent">Tweet Content:</label><br>
+        <textarea id="tweetContent" name="tweetContent" rows="4" cols="50" required></textarea><br><br>
+        <input type="submit" value="Create Tweet">
+    </form>
+
+    <script>
+        document.getElementById("tweetForm").addEventListener("submit", function(event) {
+            event.preventDefault(); // Prevent the default form submission
+
+            // Get the tweet content from the form
+            var tweetContent = document.getElementById("tweetContent").value;
+
+            // Make a POST request to your Go server
+            fetch("http://localhost:8080/create_tweet", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: "tweetContent=" + encodeURIComponent(tweetContent),
+                mode: "cors"
+})
+
+            .then(response => response.text())
+            .then(data => {
+                // Display the response from the server (you can customize this part)
+                alert(data);
+            })
+            .catch(error => {
+                console.error("Error:", error);
+                alert("An error occurred while creating the tweet.");
+            });
+        });
+    </script>
+</body>
+</html>
