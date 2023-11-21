@@ -14,6 +14,8 @@ import (
 
 var db *sql.DB
 
+//trying to recover todays hardwork
+
 func init() {
 
 	// Open a database connection
