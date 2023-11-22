@@ -1,37 +1,61 @@
 import React, { useState } from 'react';
+import { useMutation, useQuery, gql } from '@apollo/client';
 import './App.css';
+
+const GET_TWEETS = gql`
+  query GetTweets {
+    tweets {
+      id
+      content
+    }
+  }
+`;
+
+const CREATE_TWEET = gql`
+  mutation CreateTweet($content: String!) {
+    createTweet(content: $content) {
+      id
+      content
+    }
+  }
+`;
 
 function App() {
   const [tweetContent, setTweetContent] = useState('');
   const [message, setMessage] = useState('');
 
+  const { loading, error, data } = useQuery(GET_TWEETS);
+
+  const [createTweet] = useMutation(CREATE_TWEET, {
+    update: (cache, { data: { createTweet } }) => {
+      const { tweets } = cache.readQuery({ query: GET_TWEETS });
+      cache.writeQuery({
+        query: GET_TWEETS,
+        data: { tweets: [...tweets, createTweet] },
+      });
+    },
+    onError: (error) => {
+      setMessage('An error occurred while creating the tweet.');
+    },
+  });
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
     try {
-      const response = await fetch('http://localhost:8080/create_tweet', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `tweetContent=${encodeURIComponent(tweetContent)}`,
-        mode: 'cors',
+      const { data: { createTweet: newTweet } } = await createTweet({
+        variables: { content: tweetContent },
       });
-
-      if (!response.ok) {
-        throw new Error('An error occurred while creating the tweet.');
-      }
-
-      const data = await response.text();
-      setMessage(data); // Set success message
+      setMessage(`Tweet created: ${newTweet.content}`);
+      setTweetContent('');
     } catch (error) {
       console.error('Error:', error);
-      setMessage('An error occurred while creating the tweet.');
+      setMessage(`An error occurred while creating the tweet: ${error.message}`);
     }
   };
 
-  //hello
-
+  if (loading) return <p>Loading...</p>;
+  if (error) return <p>Error: {error.message}</p>;
 
   return (
     <div className="App">
@@ -58,8 +82,15 @@ function App() {
           {message}
         </div>
       )}
+
+      <h2>Tweets</h2>
+      <ul>
+        {data.tweets.map((tweet) => (
+          <li key={tweet.id}>{tweet.content}</li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-export default App;
+export { App };

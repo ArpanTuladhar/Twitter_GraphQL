@@ -9,12 +9,11 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
+	"github.com/graphql-go/graphql"
 	"github.com/rs/cors"
 )
 
 var db *sql.DB
-
-//trying to recover todays hardwork
 
 func init() {
 
@@ -34,54 +33,141 @@ func init() {
 	log.Println("Connected to the database")
 }
 
-func handleCreateTweet(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		// Parse form data
-		err := r.ParseForm()
-		if err != nil {
-			http.Error(w, "Unable to parse form data", http.StatusInternalServerError)
-			return
-		}
+var tweetType = graphql.NewObject(
+	graphql.ObjectConfig{
+		Name: "Tweet",
+		Fields: graphql.Fields{
+			"id": &graphql.Field{
+				Type: graphql.Int,
+			},
+			"content": &graphql.Field{
+				Type: graphql.String,
+			},
+		},
+	},
+)
 
-		// Get tweet content from the form
-		tweetContent := r.FormValue("tweetContent")
+var queryType = graphql.NewObject(
+	graphql.ObjectConfig{
+		Name: "Query",
+		Fields: graphql.Fields{
+			"tweets": &graphql.Field{
+				Type: graphql.NewList(tweetType),
+				Resolve: func(params graphql.ResolveParams) (interface{}, error) {
+					rows, err := db.Query("SELECT id, content FROM tweets")
+					if err != nil {
+						return nil, err
+					}
+					defer rows.Close()
 
-		// Save the tweet content to the database
-		_, err = db.Exec("INSERT INTO tweets (content) VALUES (?)", tweetContent)
-		if err != nil {
-			log.Println("Error storing tweet in the database:", err)
-			http.Error(w, "Error storing tweet in the database", http.StatusInternalServerError)
-			return
-		}
+					var tweets []map[string]interface{}
+					for rows.Next() {
+						var id int
+						var content string
+						err := rows.Scan(&id, &content)
+						if err != nil {
+							return nil, err
+						}
+						tweet := map[string]interface{}{
+							"id":      id,
+							"content": content,
+						}
+						tweets = append(tweets, tweet)
+					}
 
-		// Respond to the client with a JSON response
-		response := map[string]string{
-			"status":  "success",
-			"message": fmt.Sprintf("Tweet created: %s", tweetContent),
-		}
+					return tweets, nil
+				},
+			},
+		},
+	},
+)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	} else {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+var mutationType = graphql.NewObject(
+	graphql.ObjectConfig{
+		Name: "Mutation",
+		Fields: graphql.Fields{
+			"createTweet": &graphql.Field{
+				Type:        tweetType,
+				Description: "Create a new tweet",
+				Args: graphql.FieldConfigArgument{
+					"content": &graphql.ArgumentConfig{
+						Type: graphql.NewNonNull(graphql.String),
+					},
+				},
+				Resolve: func(params graphql.ResolveParams) (interface{}, error) {
+					content, _ := params.Args["content"].(string)
+					result, err := db.Exec("INSERT INTO tweets (content) VALUES (?)", content)
+					if err != nil {
+						return nil, err
+					}
+
+					id, _ := result.LastInsertId()
+
+					createdTweet := map[string]interface{}{
+						"id":      id,
+						"content": content,
+					}
+
+					return createdTweet, nil
+				},
+			},
+		},
+	},
+)
+
+var schema, _ = graphql.NewSchema(
+	graphql.SchemaConfig{
+		Query:    queryType,
+		Mutation: mutationType,
+	},
+)
+
+func handleGraphQL(w http.ResponseWriter, r *http.Request) {
+	// Handle preflight requests
+	if r.Method == "OPTIONS" {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		return
 	}
+
+	var result *graphql.Result
+	query := r.URL.Query().Get("query")
+	if query != "" {
+		result = graphql.Do(graphql.Params{
+			Schema:        schema,
+			RequestString: query,
+		})
+	} else {
+		http.Error(w, "No GraphQL query provided", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func main() {
 	r := mux.NewRouter()
-	r.HandleFunc("/create_tweet", handleCreateTweet).Methods("POST")
 
-	// Create a new CORS handler
+	// Handle the root path with a simple message
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "Welcome to the Twitter Clone API!")
+	})
+
+	// Handle the /graphql path for GraphQL requests
+	r.HandleFunc("/graphql", handleGraphQL).Methods("POST", "OPTIONS")
+
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"}, // Update this with your frontend's actual origin
+		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
 		AllowedHeaders: []string{"Content-Type"},
 	})
 
-	// Use the CORS middleware
 	handler := c.Handler(r)
 
 	http.Handle("/", handler)
 
-	http.ListenAndServe(":8080", nil)
+	log.Println("Server started on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
